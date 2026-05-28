@@ -90,8 +90,12 @@ export default async function ARPage({ params }: ARPageProps) {
 
             <div className="rounded-[24px] border border-[#d5d0c4] bg-white p-5">
               <p className="text-sm font-medium text-[#625d54]">
-                Move your phone around the table, then launch AR from the 3D
-                viewer when your device supports it.
+                On Android 16 (e.g. Moto Edge), use{" "}
+                <span className="font-semibold text-[#171512]">
+                  View in AR (Chrome)
+                </span>
+                . Scene Viewer may close instantly due to a Google app bug.
+                Update Chrome, Google app, and Google Play Services for AR.
               </p>
             </div>
           </div>
