@@ -1,6 +1,7 @@
-import type { CSSProperties, HTMLAttributes } from "react";
+import type { CSSProperties, HTMLAttributes, Ref } from "react";
 
 type ModelViewerElement = HTMLAttributes<HTMLElement> & {
+  ref?: Ref<HTMLElement>;
   src?: string;
   "ios-src"?: string;
   alt?: string;
