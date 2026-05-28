@@ -15,10 +15,6 @@ const nextConfig: NextConfig = {
             key: "Access-Control-Allow-Methods",
             value: "GET, HEAD, OPTIONS",
           },
-          {
-            key: "Content-Type",
-            value: "model/gltf-binary",
-          },
         ],
       },
     ];

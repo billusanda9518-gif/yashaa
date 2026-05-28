@@ -14,8 +14,7 @@ type ModelViewerElement = HTMLElement & {
   canActivateAR?: boolean;
 };
 
-const ASTRONAUT_MODEL_SRC =
-  "https://modelviewer.dev/shared-assets/models/Astronaut.glb";
+const ASTRONAUT_MODEL_SRC = "/models/astronaut.glb";
 
 function toAbsoluteAssetUrl(path: string) {
   if (typeof window === "undefined") {
@@ -29,21 +28,49 @@ function toAbsoluteAssetUrl(path: string) {
   return new URL(path, window.location.origin).href;
 }
 
+function getArModesForDevice() {
+  if (typeof window === "undefined") {
+    return "scene-viewer";
+  }
+
+  const ua = navigator.userAgent;
+
+  // iPhone/iPad: Quick Look only (needs USDZ).
+  if (/iPhone|iPad|iPod/i.test(ua)) {
+    return "quick-look";
+  }
+
+  // Android: Scene Viewer only. WebXR first causes instant close on many devices.
+  if (/Android/i.test(ua)) {
+    return "scene-viewer";
+  }
+
+  return "scene-viewer webxr quick-look";
+}
+
+function buildSceneViewerUrl(modelUrl: string, title: string) {
+  const params = new URLSearchParams({
+    file: modelUrl,
+    mode: "ar_preferred",
+    title,
+  });
+
+  return `https://arvr.google.com/scene-viewer/1.0?${params.toString()}`;
+}
+
 export default function ARModelViewer({ src, alt, iosSrc }: ModelViewerProps) {
   const viewerRef = useRef<ModelViewerElement | null>(null);
   const [arStatus, setArStatus] = useState<ARStatus>("loading");
   const [arMessage, setArMessage] = useState<string>("");
   const [useTestModel, setUseTestModel] = useState(false);
   const [modelSrc, setModelSrc] = useState(src);
-  const [iosModelSrc, setIosModelSrc] = useState<string | undefined>(iosSrc);
-
-  useEffect(() => {
-    void import("@google/model-viewer");
-  }, []);
+  const [iosModelSrc, setIosModelSrc] = useState<string | undefined>(undefined);
+  const [arModes, setArModes] = useState("scene-viewer");
+  const [sceneViewerUrl, setSceneViewerUrl] = useState("");
 
   const effectiveSrc = useTestModel ? ASTRONAUT_MODEL_SRC : src;
 
-  const resolvedIosSrc = useMemo(() => {
+  const candidateIosSrc = useMemo(() => {
     if (useTestModel) {
       return undefined;
     }
@@ -60,13 +87,34 @@ export default function ARModelViewer({ src, alt, iosSrc }: ModelViewerProps) {
   }, [effectiveSrc, iosSrc, useTestModel]);
 
   useEffect(() => {
-    setModelSrc(toAbsoluteAssetUrl(effectiveSrc));
-    setIosModelSrc(
-      resolvedIosSrc ? toAbsoluteAssetUrl(resolvedIosSrc) : undefined,
-    );
+    void import("@google/model-viewer");
+  }, []);
+
+  useEffect(() => {
+    const absoluteModelSrc = toAbsoluteAssetUrl(effectiveSrc);
+    setModelSrc(absoluteModelSrc);
+    setArModes(getArModesForDevice());
+    setSceneViewerUrl(buildSceneViewerUrl(absoluteModelSrc, alt));
     setArStatus("loading");
     setArMessage("");
-  }, [effectiveSrc, resolvedIosSrc]);
+    setIosModelSrc(undefined);
+
+    if (!candidateIosSrc) {
+      return;
+    }
+
+    const absoluteIosSrc = toAbsoluteAssetUrl(candidateIosSrc);
+
+    void fetch(absoluteIosSrc, { method: "HEAD" })
+      .then((response) => {
+        if (response.ok) {
+          setIosModelSrc(absoluteIosSrc);
+        }
+      })
+      .catch(() => {
+        setIosModelSrc(undefined);
+      });
+  }, [alt, candidateIosSrc, effectiveSrc]);
 
   const attachViewerListeners = useCallback(
     (viewer: ModelViewerElement) => {
@@ -74,27 +122,29 @@ export default function ARModelViewer({ src, alt, iosSrc }: ModelViewerProps) {
         setArStatus("ready");
         setArMessage(
           viewer.canActivateAR
-            ? "AR is available on this device."
-            : "Model loaded, but AR is unavailable in this browser.",
+            ? "Tap the AR button on the model to open your camera."
+            : "Model loaded. Use direct Scene Viewer link below.",
         );
         console.info("[AR] model loaded", {
           src: modelSrc,
+          arModes,
           canActivateAR: viewer.canActivateAR,
         });
       };
 
       const onError = (event: Event) => {
         setArStatus("error");
-        setArMessage("Model failed to load. Check GLB path and CORS headers.");
+        setArMessage("Model failed to load. Redeploy and verify /models CORS headers.");
         console.error("[AR] model failed to load", { src: modelSrc, event });
       };
 
       const onArStatus = (event: Event) => {
         const detail = (event as CustomEvent<{ status?: string }>).detail;
         console.info("[AR] ar-status", detail);
+
         if (detail?.status === "failed") {
           setArMessage(
-            "AR launch failed. Use HTTPS, enable CORS for /models, and test with Astronaut.",
+            "Built-in AR failed. Tap “Open Scene Viewer (direct)” below. Also update Google app + Google Play Services for AR.",
           );
         }
       };
@@ -109,7 +159,7 @@ export default function ARModelViewer({ src, alt, iosSrc }: ModelViewerProps) {
         viewer.removeEventListener("ar-status", onArStatus as EventListener);
       };
     },
-    [modelSrc],
+    [arModes, modelSrc],
   );
 
   const setViewerRef = useCallback(
@@ -125,60 +175,57 @@ export default function ARModelViewer({ src, alt, iosSrc }: ModelViewerProps) {
   );
 
   return (
-    <div key={modelSrc} className="relative h-full min-h-[430px] w-full">
-      <model-viewer
-        ref={setViewerRef}
-        className="h-full min-h-[430px] w-full bg-[radial-gradient(circle_at_50%_10%,#fff7ed_0,#f4f7f2_42%,#dce6dc_100%)]"
-        src={modelSrc}
-        ios-src={iosModelSrc}
-        alt={alt}
-        ar
-        ar-modes="scene-viewer quick-look webxr"
-        ar-scale="auto"
-        ar-placement="floor"
-        camera-controls
-        auto-rotate
-        shadow-intensity="0.85"
-        exposure="0.9"
-        camera-orbit="35deg 68deg 2.4m"
-        field-of-view="28deg"
-        touch-action="pan-y"
-        loading="eager"
-        reveal="auto"
-        crossOrigin="anonymous"
-      >
-        <button
-          slot="ar-button"
-          type="button"
-          className="absolute bottom-6 left-1/2 z-10 -translate-x-1/2 rounded-full bg-[#26382c] px-5 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-[#f9f4e7] shadow-lg transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={arStatus === "loading" || arStatus === "error"}
-        >
-          View in AR
-        </button>
-      </model-viewer>
+      <div key={modelSrc} className="relative h-full min-h-[430px] w-full">
+        <model-viewer
+          ref={setViewerRef}
+          className="h-full min-h-[430px] w-full bg-[radial-gradient(circle_at_50%_10%,#fff7ed_0,#f4f7f2_42%,#dce6dc_100%)]"
+          src={modelSrc}
+          {...(iosModelSrc ? { "ios-src": iosModelSrc } : {})}
+          alt={alt}
+          ar
+          ar-modes={arModes}
+          ar-scale="auto"
+          ar-placement="floor"
+          camera-controls
+          auto-rotate
+          shadow-intensity="0.85"
+          exposure="0.9"
+          camera-orbit="35deg 68deg 2.4m"
+          field-of-view="28deg"
+          touch-action="pan-y"
+          loading="eager"
+          reveal="auto"
+          interaction-prompt="auto"
+        />
 
-      <div className="pointer-events-none absolute inset-x-0 bottom-20 flex flex-wrap justify-center gap-3 p-4">
-        <button
-          type="button"
-          onClick={() => setUseTestModel((value) => !value)}
-          className="pointer-events-auto inline-flex items-center justify-center rounded-full border border-[#d5d0c4] bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#625d54] transition hover:bg-[#f8f8f6]"
-        >
-          {useTestModel ? "Use Dish Model" : "Use Astronaut Test Model"}
-        </button>
-      </div>
-
-      <div className="pointer-events-none absolute left-4 top-4 max-w-[85%] space-y-2">
-        <div className="rounded-full bg-black/65 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white">
-          {arStatus === "loading" ? "Loading model..." : null}
-          {arStatus === "ready" ? "Model ready" : null}
-          {arStatus === "error" ? "Model failed to load" : null}
+        <div className="pointer-events-none absolute inset-x-0 bottom-4 flex flex-col items-center gap-3 px-4">
+          <a
+            href={sceneViewerUrl}
+            className="pointer-events-auto inline-flex items-center justify-center rounded-full border border-[#26382c] bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#26382c] transition hover:bg-[#f8f8f6]"
+          >
+            Open Scene Viewer (direct)
+          </a>
+          <button
+            type="button"
+            onClick={() => setUseTestModel((value) => !value)}
+            className="pointer-events-auto inline-flex items-center justify-center rounded-full border border-[#d5d0c4] bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#625d54] transition hover:bg-[#f8f8f6]"
+          >
+            {useTestModel ? "Use Dish Model" : "Use Astronaut Test Model"}
+          </button>
         </div>
-        {arMessage ? (
-          <p className="rounded-xl bg-black/65 px-3 py-2 text-xs leading-5 text-white">
-            {arMessage}
-          </p>
-        ) : null}
+
+        <div className="pointer-events-none absolute left-4 top-4 max-w-[90%] space-y-2">
+          <div className="rounded-full bg-black/65 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white">
+            {arStatus === "loading" ? "Loading model..." : null}
+            {arStatus === "ready" ? "Model ready" : null}
+            {arStatus === "error" ? "Model failed to load" : null}
+          </div>
+          {arMessage ? (
+            <p className="rounded-xl bg-black/65 px-3 py-2 text-xs leading-5 text-white">
+              {arMessage}
+            </p>
+          ) : null}
+        </div>
       </div>
-    </div>
   );
 }
